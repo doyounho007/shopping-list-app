@@ -165,9 +165,16 @@
     <div class="empty" id="empty-msg">목록이 비어 있습니다. 물건을 추가해 보세요!</div>
   </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
 (function () {
-  const STORAGE_KEY = 'shopping-list-items';
+  // Supabase 프로젝트 연결 정보
+  const SUPABASE_URL = 'https://jrngcbmnmhhsbzxxrvwb.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_sotNQKbcHlUns7RzONAEPQ_srHvn9EP';
+  const TABLE_NAME = 'shopping_items';
+
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
   const input = document.getElementById('item-input');
   const addBtn = document.getElementById('add-btn');
   const list = document.getElementById('list');
@@ -175,19 +182,20 @@
   const countText = document.getElementById('count-text');
   const clearCheckedBtn = document.getElementById('clear-checked-btn');
 
-  let items = loadItems();
+  let items = [];
 
-  function loadItems() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch (e) {
-      return [];
+  async function loadItems() {
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('항목을 불러오지 못했습니다:', error);
+      return;
     }
-  }
-
-  function saveItems() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    items = data || [];
+    render();
   }
 
   function render() {
@@ -203,7 +211,7 @@
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.checked = item.checked;
-        checkbox.addEventListener('change', () => toggleItem(item.id));
+        checkbox.addEventListener('change', () => toggleItem(item.id, checkbox.checked));
 
         const label = document.createElement('span');
         label.className = 'label';
@@ -228,33 +236,80 @@
       : `${items.length}개 항목 (${checkedCount}개 완료)`;
   }
 
-  function addItem() {
+  async function addItem() {
     const text = input.value.trim();
     if (!text) return;
-    items.push({ id: Date.now() + Math.random(), text, checked: false });
+
     input.value = '';
-    saveItems();
+
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .insert({ text, checked: false })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('항목을 추가하지 못했습니다:', error);
+      return;
+    }
+
+    items.push(data);
     render();
     input.focus();
   }
 
-  function toggleItem(id) {
+  async function toggleItem(id, checked) {
     const item = items.find(i => i.id === id);
-    if (item) item.checked = !item.checked;
-    saveItems();
+    if (item) item.checked = checked;
     render();
+
+    const { error } = await supabase
+      .from(TABLE_NAME)
+      .update({ checked })
+      .eq('id', id);
+
+    if (error) {
+      console.error('항목 상태를 변경하지 못했습니다:', error);
+      if (item) item.checked = !checked;
+      render();
+    }
   }
 
-  function deleteItem(id) {
+  async function deleteItem(id) {
+    const prevItems = items;
     items = items.filter(i => i.id !== id);
-    saveItems();
     render();
+
+    const { error } = await supabase
+      .from(TABLE_NAME)
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('항목을 삭제하지 못했습니다:', error);
+      items = prevItems;
+      render();
+    }
   }
 
-  function clearChecked() {
+  async function clearChecked() {
+    const checkedIds = items.filter(i => i.checked).map(i => i.id);
+    if (checkedIds.length === 0) return;
+
+    const prevItems = items;
     items = items.filter(i => !i.checked);
-    saveItems();
     render();
+
+    const { error } = await supabase
+      .from(TABLE_NAME)
+      .delete()
+      .in('id', checkedIds);
+
+    if (error) {
+      console.error('체크된 항목을 삭제하지 못했습니다:', error);
+      items = prevItems;
+      render();
+    }
   }
 
   addBtn.addEventListener('click', addItem);
@@ -263,7 +318,7 @@
   });
   clearCheckedBtn.addEventListener('click', clearChecked);
 
-  render();
+  loadItems();
 })();
 </script>
 </body>
